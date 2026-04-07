@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 import random, string, time
 import os
 
@@ -23,9 +23,16 @@ def send():
             return jsonify({"error": "No file"}), 400
 
         code = generate_code()
-        filepath = os.path.join(UPLOAD_FOLDER, code + "_" + file.filename)
+
+        filename = file.filename
+        content_type = file.content_type or "application/octet-stream"
+
+        filepath = os.path.join(UPLOAD_FOLDER, code + "_" + filename)
         file.save(filepath)
-        store[code] = ("file", filepath, time.time())
+
+        # ✅ Store metadata
+        store[code] = ("file", filepath, filename, content_type, time.time())
+
         return jsonify({"code": code})
 
     # ✅ Handle text
@@ -46,27 +53,35 @@ def get(code):
     if code not in store:
         return jsonify({"error": "Invalid code"}), 404
 
-    dtype, value, t = store[code]
+    entry = store[code]
 
-    if time.time() - t > EXPIRY:
+    # ✅ Expiry check
+    if time.time() - entry[-1] > EXPIRY:
         del store[code]
         return jsonify({"error": "Expired"}), 410
 
-    if dtype == "text":
-        return jsonify({"type": "text", "data": value})
+    if entry[0] == "text":
+        return jsonify({"type": "text", "data": entry[1]})
 
-    if dtype == "file":
-        return send_file(value, as_attachment=True)
+    if entry[0] == "file":
+        _, filepath, filename, content_type, _ = entry
+
+        return Response(
+            open(filepath, "rb"),
+            content_type=content_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
 
     return jsonify({"error": "Unknown type"}), 500
 
 
 @app.route("/")
 def home():
-    return "API is running (text + image support)"
+    return "API supports ALL file types + text"
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
